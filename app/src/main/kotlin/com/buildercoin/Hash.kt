@@ -1,9 +1,13 @@
 package com.buildercoin
 
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.google.common.io.BaseEncoding
 import java.security.MessageDigest
 
-fun Any.hash() = GSON.toJson(this).hash()
+private val MAPPER = jacksonObjectMapper().enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)!!
+
+fun Any.hash() = MAPPER.writeValueAsString(this).hash()
 
 fun String.hash(algorithm: String = "SHA-256"): Hash {
     val messageDigest = MessageDigest.getInstance(algorithm)

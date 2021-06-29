@@ -1,12 +1,18 @@
 package com.buildercoin
 
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
+import com.fasterxml.jackson.module.kotlin.KotlinModule
+import com.fasterxml.jackson.module.kotlin.readValue
 import com.google.common.base.Preconditions.checkArgument
 import com.google.common.io.BaseEncoding
 import io.micronaut.context.annotation.Context
 import io.micronaut.http.annotation.Controller
+import io.micronaut.http.annotation.Delete
 import io.micronaut.http.annotation.Get
 import io.micronaut.http.annotation.Post
 import mu.KotlinLogging
+import java.io.File
+import java.net.URI
 import java.nio.ByteBuffer
 import javax.annotation.PostConstruct
 import javax.inject.Singleton
@@ -18,17 +24,34 @@ import kotlin.random.nextUInt
 @Singleton
 @Controller("/")
 class Miner {
+    data class Configuration(
+        val peers: MutableSet<URI>
+    ) {
+        companion object {
+            private val yaml = YAMLMapper().registerModule(KotlinModule())!!
+
+            private val configurationFile = File("miner.yml")
+
+            fun load() = yaml.readValue<Configuration>(configurationFile).also { it.save() }
+        }
+
+        fun save() {
+            yaml.writeValue(configurationFile, this)
+        }
+    }
 
     private val logger = KotlinLogging.logger { }
 
     private val blockReward: CAmount = 50
 
-    private val blockchain = mutableListOf<CBlockHeader>()
+    private var blockchain = mutableListOf<CBlockHeader>()
 
     private val unverifiedTransactions = mutableListOf<CTransaction>()
     private val verifiedTransactions = mutableMapOf<Hash, CTransaction>()
 
     private val unspentTransactionOutputs = mutableMapOf<COutPoint, CTxOut>()
+
+    private val configuration = Configuration.load()
 
     @PostConstruct
     fun startMining() = thread { mine() }
@@ -42,8 +65,46 @@ class Miner {
     @Get("/transactions/{hash}")
     fun getTransaction(hash: Hash) = verifiedTransactions[hash]
 
-    fun mine() {
+    @Get("/peers")
+    fun getPeers() = configuration.peers
+
+    @Post("/peers")
+    fun addPeer(peer: URI) {
+        peer.resolve("/blocks").get<MutableList<CBlockHeader>>()
+
+        configuration.peers.add(peer)
+        configuration.save()
+    }
+
+    @Delete("/peers/{peer}")
+    fun deletePeer(peer: URI) {
+        if (configuration.peers.remove(peer)) {
+            configuration.save()
+        }
+    }
+
+    private fun mine() {
         logger.info { "Started mining" }
+
+        configuration.peers.forEach { peer ->
+            try {
+                val peerChain = peer.resolve("/blocks").get<MutableList<CBlockHeader>>()
+
+                if (peerChain.size > blockchain.size) {
+                    var prevHeader: CBlockHeader? = null
+                    for (header in peerChain) {
+                        if (prevHeader != null) {
+                            checkArgument(header.hashPrevBlock == prevHeader.hash())
+                        }
+                        prevHeader = header
+                    }
+
+                    blockchain = peerChain
+                }
+            } catch (e: Exception) {
+                logger.warn("Failed to sync with peer: $peer", e)
+            }
+        }
 
         while (true) {
             val transactions = unverifiedTransactions.toMutableList()
@@ -58,7 +119,7 @@ class Miner {
                     outputs = listOf(CTxOut(blockReward + fee, scriptPubKey))
                 )
             )
-            val hashMerkleRoot = transactions.hash()
+            val hashMerkleRoot = transactions.hash() // That's not how Merkle Trees work IRL
 
             var attempts = 0
             while (true) {
@@ -108,6 +169,7 @@ class Miner {
             val previousOutput = unspentTransactionOutputs[previousOutputPointer]
                 ?: throw IllegalStateException("Unspent transaction not found: $previousOutputPointer")
 
+            // Completely nonsensical "script validation"
             if (previousOutput.scriptPubKey != input.scriptSig) {
                 throw IllegalArgumentException("Failed to verify signature: ${previousOutput.scriptPubKey} != ${input.scriptSig}")
             }
@@ -127,4 +189,3 @@ class Miner {
         return totalInput - totalOutput
     }
 }
-

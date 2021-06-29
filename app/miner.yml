@@ -1,0 +1,4 @@
+---
+peers:
+- "http://localhost:14702"
+- "http://localhost:40027"

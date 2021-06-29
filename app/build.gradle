@@ -17,14 +17,16 @@ dependencies {
 
     implementation "io.github.microutils:kotlin-logging:2.0.4"
     implementation "org.jetbrains.kotlin:kotlin-stdlib"
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.4.2"
-    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.1.0"
-    implementation "com.fasterxml.jackson.core:jackson-databind:2.12.1"
-    implementation "com.fasterxml.jackson.module:jackson-module-kotlin:2.12.1"
+    implementation "org.jetbrains.kotlin:kotlin-reflect"
     implementation "software.amazon.kinesis:amazon-kinesis-client:2.3.4"
-    implementation "com.google.guava:guava:30.1-jre"
+    implementation "com.google.guava:guava:30.1.1-jre"
 
     implementation "com.google.code.gson:gson:2.8.7"
+
+    implementation platform("com.fasterxml.jackson:jackson-bom:2.12.3")
+    implementation "com.fasterxml.jackson.core:jackson-databind"
+    implementation "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml"
+    implementation "com.fasterxml.jackson.module:jackson-module-kotlin"
 
     implementation platform("io.micronaut:micronaut-bom:3.0.0-M1")
     implementation "io.micronaut:micronaut-http-server-netty"
@@ -32,14 +34,29 @@ dependencies {
     implementation "io.micronaut:micronaut-validation"
 
     runtimeOnly "ch.qos.logback:logback-classic"
+
+    testImplementation "org.junit.jupiter:junit-jupiter-api"
+    testImplementation "io.micronaut.test:micronaut-test-junit5"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine"
 }
 
 mainClassName = "com.buildercoin.ApplicationKt"
 
+test {
+    useJUnitPlatform()
+}
+
 compileKotlin {
-    kotlinOptions.jvmTarget = "1.8"
+    kotlinOptions {
+        jvmTarget = '1.8'
+        //Will retain parameter names for Java reflection
+        javaParameters = true
+    }
 }
 
 compileTestKotlin {
-    kotlinOptions.jvmTarget = "1.8"
+    kotlinOptions {
+        jvmTarget = '1.8'
+        javaParameters = true
+    }
 }
