@@ -6,6 +6,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.google.common.base.Preconditions.checkArgument
 import com.google.common.io.BaseEncoding
 import io.micronaut.context.annotation.Context
+import io.micronaut.http.annotation.Body
 import io.micronaut.http.annotation.Controller
 import io.micronaut.http.annotation.Delete
 import io.micronaut.http.annotation.Get
@@ -46,10 +47,13 @@ class Miner {
 
     private var blockchain = mutableListOf<CBlockHeader>()
 
-    private val unverifiedTransactions = mutableListOf<CTransaction>()
-    private val verifiedTransactions = mutableMapOf<Hash, CTransaction>()
+    // CTxMemPool stores valid-according-to-the-current-best-chain transactions that may be included in the next block.
+    private val mempool: CTxMemPool = mutableListOf()
 
-    private val unspentTransactionOutputs = mutableMapOf<COutPoint, CTxOut>()
+    // Unspent Transaction Outputs
+    private val utxo = mutableMapOf<COutPoint, CTxOut>()
+
+    private val verifiedTransactions = mutableMapOf<Hash, CTransaction>()
 
     private val configuration = Configuration.load()
 
@@ -107,7 +111,7 @@ class Miner {
         }
 
         while (true) {
-            val transactions = unverifiedTransactions.toMutableList()
+            val transactions = mempool.toMutableList()
 
             val fee = transactions.sumOf { calculateFee(it) }
 
@@ -136,15 +140,15 @@ class Miner {
                     transactions.forEach { transaction ->
                         val hash = transaction.hash()
                         transaction.outputs.forEachIndexed { index, cTxOut ->
-                            unspentTransactionOutputs[COutPoint(hash, index.toUInt())] = cTxOut
+                            utxo[COutPoint(hash, index.toUInt())] = cTxOut
                         }
-                        transaction.inputs.forEach { unspentTransactionOutputs.remove(it.previousOutput) }
+                        transaction.inputs.forEach { utxo.remove(it.previousOutput) }
                         verifiedTransactions[hash] = transaction
                     }
                     break
                 }
 
-                if (unverifiedTransactions.size != transactions.size) {
+                if (mempool.size != transactions.size) {
                     break
                 }
             }
@@ -152,21 +156,22 @@ class Miner {
     }
 
     @Post("/transactions")
-    fun addTransaction(transaction: CTransaction) {
+    fun addTransaction(@Body input: String) {
+        val transaction = GSON.fromJson<CTransaction>(input)
         checkArgument(transaction.version == 2u, "Version must be 2")
-        checkArgument(transaction.inputs.isNotEmpty(), "Transaction must have inputs")
-        checkArgument(transaction.outputs.isNotEmpty(), "Transaction must have outputs")
+        checkArgument(!transaction.inputs.isNullOrEmpty(), "Transaction must have inputs")
+        checkArgument(!transaction.outputs.isNullOrEmpty(), "Transaction must have outputs")
 
         validate(transaction)
 
-        unverifiedTransactions.add(transaction)
+        mempool.add(transaction)
     }
 
     private fun validate(transaction: CTransaction) {
         transaction.inputs.forEach { input ->
             val previousOutputPointer = input.previousOutput
 
-            val previousOutput = unspentTransactionOutputs[previousOutputPointer]
+            val previousOutput = utxo[previousOutputPointer]
                 ?: throw IllegalStateException("Unspent transaction not found: $previousOutputPointer")
 
             // Completely nonsensical "script validation"
@@ -183,7 +188,7 @@ class Miner {
     }
 
     private fun calculateFee(transaction: CTransaction): CAmount {
-        val totalInput: CAmount = transaction.inputs.sumOf { input -> unspentTransactionOutputs[input.previousOutput]!!.value }
+        val totalInput: CAmount = transaction.inputs.sumOf { input -> utxo[input.previousOutput]!!.value }
         val totalOutput: CAmount = transaction.outputs.sumOf { it.value }
 
         return totalInput - totalOutput
